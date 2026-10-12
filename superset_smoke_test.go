@@ -30,6 +30,11 @@ func TestSupersetParseRestoreAccept(t *testing.T) {
 		{"fk_ga", `ALTER TABLE c ADD CONSTRAINT fk FOREIGN KEY (pid) REFERENCES p(id) ON UPDATE SET NULL`, "*ast.AlterTableStmt"},
 		{"vector", `CREATE TABLE t (id INT PRIMARY KEY, embedding VECTOR(3))`, "*ast.CreateTableStmt"},
 		{"vector", `CREATE TABLE t (id INT PRIMARY KEY, embedding VECTOR)`, "*ast.CreateTableStmt"},
+		{"affinity", `CREATE TABLE t1 (a INT) AFFINITY = 'table'`, "*ast.CreateTableStmt"},
+		{"show_affinity", `SHOW AFFINITY`, "*ast.ShowStmt"},
+		{"for_update_of", `SELECT * FROM t AS a FOR UPDATE OF a`, "*ast.SelectStmt"},
+		{"partial_index", `CREATE INDEX idx ON t (c) WHERE c IS NOT NULL`, "*ast.CreateIndexStmt"},
+		{"lateral", `SELECT * FROM t1, LATERAL (SELECT * FROM t2 WHERE t2.id = t1.id) AS dt`, "*ast.SelectStmt"},
 	}
 	p := parser.New()
 	for _, c := range cases {
@@ -53,6 +58,12 @@ func TestSupersetParseRestoreAccept(t *testing.T) {
 				gotTyp = "*ast.CreateTableStmt"
 			case *ast.AlterTableStmt:
 				gotTyp = "*ast.AlterTableStmt"
+			case *ast.ShowStmt:
+				gotTyp = "*ast.ShowStmt"
+			case *ast.SelectStmt:
+				gotTyp = "*ast.SelectStmt"
+			case *ast.CreateIndexStmt:
+				gotTyp = "*ast.CreateIndexStmt"
 			default:
 				gotTyp = "other"
 			}

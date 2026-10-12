@@ -388,6 +388,9 @@ type TableSource struct {
 
 	// AsName is the alias name of the table source.
 	AsName model.CIStr
+
+	// Lateral indicates a LATERAL derived table (MySQL 8.0 / TiDB 8.5.7+ parse-only).
+	Lateral bool
 }
 
 // JsonTableColumn represents one COLUMNS entry of JSON_TABLE.
@@ -482,6 +485,10 @@ func (n *TableSource) Restore(ctx *format.RestoreCtx) error {
 		needParen = true
 	}
 
+	if n.Lateral {
+		ctx.WriteKeyWord("LATERAL ")
+	}
+
 	if tn, tnCase := n.Source.(*TableName); tnCase {
 		if needParen {
 			ctx.WritePlain("(")
@@ -545,6 +552,13 @@ const (
 	SelectLockInShareMode
 	SelectLockForUpdateNoWait
 )
+
+// SelectLockOption is the parsed FOR UPDATE / LOCK IN SHARE MODE clause,
+// optionally with OF table-name list (TiDB 8.5.6+).
+type SelectLockOption struct {
+	LockTp SelectLockType
+	Tables []*TableName
+}
 
 // String implements fmt.Stringer.
 func (slt SelectLockType) String() string {
@@ -967,6 +981,8 @@ type SelectStmt struct {
 	Limit *Limit
 	// LockTp is the lock type
 	LockTp SelectLockType
+	// LockTables is the optional OF table list for FOR UPDATE OF ...
+	LockTables []*TableName
 	// TableHints represents the table level Optimizer Hint for join type
 	TableHints []*TableOptimizerHint
 	// IsAfterUnionDistinct indicates whether it's a stmt after "union distinct".
@@ -1103,7 +1119,21 @@ func (n *SelectStmt) Restore(ctx *format.RestoreCtx) error {
 		ctx.WriteKeyWord(n.LockTp.String())
 	case SelectLockForUpdate, SelectLockForUpdateNoWait:
 		ctx.WritePlain(" ")
-		ctx.WriteKeyWord(n.LockTp.String())
+		ctx.WriteKeyWord("FOR UPDATE")
+		if len(n.LockTables) > 0 {
+			ctx.WriteKeyWord(" OF ")
+			for i, tn := range n.LockTables {
+				if i > 0 {
+					ctx.WritePlain(",")
+				}
+				if err := tn.Restore(ctx); err != nil {
+					return errors.Annotatef(err, "An error occurred while restore SelectStmt.LockTables[%d]", i)
+				}
+			}
+		}
+		if n.LockTp == SelectLockForUpdateNoWait {
+			ctx.WriteKeyWord(" NOWAIT")
+		}
 	}
 
 	if n.SelectIntoOpt != nil {
@@ -2196,6 +2226,7 @@ const (
 	ShowBackups
 	ShowRestores
 	ShowImports
+	ShowAffinity
 )
 
 const (
@@ -2498,6 +2529,8 @@ func (n *ShowStmt) Restore(ctx *format.RestoreCtx) error {
 			ctx.WriteKeyWord("RESTORES")
 		case ShowImports:
 			ctx.WriteKeyWord("IMPORTS")
+		case ShowAffinity:
+			ctx.WriteKeyWord("AFFINITY")
 		default:
 			return errors.New("Unknown ShowStmt type")
 		}
