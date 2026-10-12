@@ -30,6 +30,7 @@ var (
 	_ DMLNode = &SelectStmt{}
 	_ DMLNode = &ShowStmt{}
 	_ DMLNode = &LoadDataStmt{}
+	_ DMLNode = &ImportIntoStmt{}
 	_ DMLNode = &SplitRegionStmt{}
 
 	_ Node = &Assignment{}
@@ -1375,6 +1376,64 @@ func (n *Assignment) Accept(v Visitor) (Node, bool) {
 type ColumnNameOrUserVar struct {
 	ColumnName *ColumnName
 	UserVar    *VariableExpr
+}
+
+// ImportIntoStmt represents TiDB IMPORT INTO (Lightning physical import).
+// Minimal positive forms for SQLE parse/restore; options / FROM SELECT land in later slices.
+// See https://docs.pingcap.com/tidb/stable/sql-statement-import-into/
+type ImportIntoStmt struct {
+	dmlNode
+
+	Table   *TableName
+	Columns []*ColumnName
+	Path    string
+}
+
+// Restore implements Node interface.
+func (n *ImportIntoStmt) Restore(ctx *format.RestoreCtx) error {
+	ctx.WriteKeyWord("IMPORT INTO ")
+	if err := n.Table.Restore(ctx); err != nil {
+		return errors.Annotate(err, "An error occurred while restore ImportIntoStmt.Table")
+	}
+	if len(n.Columns) != 0 {
+		ctx.WritePlain(" (")
+		for i, col := range n.Columns {
+			if i != 0 {
+				ctx.WritePlain(",")
+			}
+			if err := col.Restore(ctx); err != nil {
+				return errors.Annotatef(err, "An error occurred while restore ImportIntoStmt.Columns[%d]", i)
+			}
+		}
+		ctx.WritePlain(")")
+	}
+	ctx.WriteKeyWord(" FROM ")
+	ctx.WriteString(n.Path)
+	return nil
+}
+
+// Accept implements Node Accept interface.
+func (n *ImportIntoStmt) Accept(v Visitor) (Node, bool) {
+	newNode, skipChildren := v.Enter(n)
+	if skipChildren {
+		return v.Leave(newNode)
+	}
+	n = newNode.(*ImportIntoStmt)
+	if n.Table != nil {
+		node, ok := n.Table.Accept(v)
+		if !ok {
+			return n, false
+		}
+		n.Table = node.(*TableName)
+	}
+	for i, col := range n.Columns {
+		node, ok := col.Accept(v)
+		if !ok {
+			return n, false
+		}
+		n.Columns[i] = node.(*ColumnName)
+	}
+	return v.Leave(n)
 }
 
 // LoadDataStmt is a statement to load data from a specified file, then insert this rows into an existing table.

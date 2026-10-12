@@ -410,6 +410,7 @@ import (
 	issuer                "ISSUER"
 	jsonType              "JSON"
 	jsonTable             "JSON_TABLE"
+	vectorType            "VECTOR"
 	keyBlockSize          "KEY_BLOCK_SIZE"
 	labels                "LABELS"
 	language              "LANGUAGE"
@@ -817,6 +818,7 @@ import (
 	InsertIntoStmt       "INSERT INTO statement"
 	IndexAdviseStmt      "INDEX ADVISE stetement"
 	KillStmt             "Kill statement"
+	ImportIntoStmt       "Import into statement"
 	LoadDataStmt         "Load data statement"
 	LoadStatsStmt        "Load statistic statement"
 	LockTablesStmt       "Lock tables statement"
@@ -2955,6 +2957,11 @@ DefaultValueExpr:
 	NowSymOptionFraction
 |	SignedLiteral
 |	NextValueForSequence
+|	'(' Expression ')'
+	{
+		// MySQL 8.0.13+ / TiDB 8.5 expression defaults: DEFAULT (expr).
+		$$ = &ast.ParenthesesExpr{Expr: $2}
+	}
 
 NowSymOptionFraction:
 	NowSym
@@ -5125,6 +5132,7 @@ UnReservedKeyword:
 |	"ISOLATION"
 |	"JSON"
 |	"JSON_TABLE"
+|	"VECTOR"
 |	"REPEATABLE"
 |	"RESPECT"
 |	"COMMITTED"
@@ -6848,6 +6856,15 @@ CastType:
 		x.Flag |= mysql.BinaryFlag | (mysql.ParseToJSONFlag)
 		x.Charset = mysql.DefaultCharset
 		x.Collate = mysql.DefaultCollationName
+		$$ = x
+	}
+|	"VECTOR" OptFieldLen
+	{
+		x := types.NewFieldType(mysql.TypeVector)
+		x.Flen = $2.(int)
+		x.Flag |= mysql.BinaryFlag
+		x.Charset = charset.CharsetBin
+		x.Collate = charset.CollationBin
 		$$ = x
 	}
 |	"DOUBLE"
@@ -9611,6 +9628,7 @@ Statement:
 |	GrantStmt
 |	GrantRoleStmt
 |	InsertIntoStmt
+|	ImportIntoStmt
 |	IndexAdviseStmt
 |	KillStmt
 |	LoadDataStmt
@@ -10322,6 +10340,15 @@ StringType:
 	{
 		x := types.NewFieldType(mysql.TypeJSON)
 		x.Decimal = 0
+		x.Charset = charset.CharsetBin
+		x.Collate = charset.CollationBin
+		$$ = x
+	}
+|	"VECTOR" OptFieldLen
+	{
+		// TiDB VECTOR / VECTOR(n); Flen holds dimension when specified.
+		x := types.NewFieldType(mysql.TypeVector)
+		x.Flen = $2.(int)
 		x.Charset = charset.CharsetBin
 		x.Collate = charset.CollationBin
 		$$ = x
@@ -11512,6 +11539,27 @@ RevokeRoleStmt:
 		$$ = &ast.RevokeRoleStmt{
 			Roles: $2.([]*auth.RoleIdentity),
 			Users: $4.([]*auth.UserIdentity),
+		}
+	}
+
+/**************************************ImportIntoStmt****************************************
+ * TiDB IMPORT INTO — see https://docs.pingcap.com/tidb/stable/sql-statement-import-into/
+ * Minimal positive forms for parse/restore (options / FROM SELECT deferred).
+ *******************************************************************************************/
+ImportIntoStmt:
+	"IMPORT" "INTO" TableName "FROM" stringLit
+	{
+		$$ = &ast.ImportIntoStmt{
+			Table: $3.(*ast.TableName),
+			Path:  $5,
+		}
+	}
+|	"IMPORT" "INTO" TableName '(' ColumnNameList ')' "FROM" stringLit
+	{
+		$$ = &ast.ImportIntoStmt{
+			Table:   $3.(*ast.TableName),
+			Columns: $5.([]*ast.ColumnName),
+			Path:    $8,
 		}
 	}
 
