@@ -6,7 +6,10 @@ import "strings"
 // 2. 支持能成功解析出所有字符集和排序。当前的解析库解析SQL时，如果存在 TiDB 不支持的字符集和排序则会显式的报错，不符合预期。
 func InitAllCharset() {
 	// 将所有的字符集都放进 `charsets`, 这是个代表当前支持的字符集。
+	// 同时写入 collationsNameMap：mysql.Collations 键类型为 uint8，无法收录 ID>255
+	// 的 MySQL 8.0 utf8mb4_*_0900_*；GetCollationByName / ParseOneStmt 依赖此表。
 	for _, c := range collations {
+		collationsNameMap[c.Name] = c
 		if charset, ok := charsets[c.CharsetName]; ok {
 			charset.Collations[c.Name] = c
 			if c.IsDefault {
